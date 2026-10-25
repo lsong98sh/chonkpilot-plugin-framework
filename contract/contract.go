@@ -110,6 +110,8 @@ func Register(srv *mcp.Server, tools []Tool, h Handler) error {
 					return Error("参数解析失败: " + err.Error()), nil
 				}
 			}
+			// 协议 _meta 透传到 handler（如宿主 `chonkpilot.instance_id` 等调用上下文）。
+			ctx = WithMeta(ctx, map[string]any(req.Params.Meta))
 			text, isErr, err := h(ctx, tool.Name, args)
 			if err != nil {
 				return Error(err.Error()), nil
@@ -121,6 +123,23 @@ func Register(srv *mcp.Server, tools []Tool, h Handler) error {
 		})
 	}
 	return nil
+}
+
+// metaCtxKey 是协议 _meta 在 ctx 中的键。
+type metaCtxKey struct{}
+
+// WithMeta 把一次工具调用的协议 _meta 注入 ctx（无内容时原样返回）。
+func WithMeta(ctx context.Context, meta map[string]any) context.Context {
+	if len(meta) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, metaCtxKey{}, meta)
+}
+
+// Meta 返回本次工具调用的协议 _meta（无则 nil）。
+func Meta(ctx context.Context) map[string]any {
+	m, _ := ctx.Value(metaCtxKey{}).(map[string]any)
+	return m
 }
 
 // HotNames 返回需要注入 LLM 的工具名。

@@ -53,6 +53,10 @@ type Options struct {
 	Roots []string
 	Logf  func(format string, args ...any)
 
+	// BootstrapFile = <exeDir>/plugin.ini（D-71）。非空且存在时，以清单为准：
+	// 只有清单内的插件会被启用，且按行序启动；清单外一律禁用。空/不存在 → 回落 enabled.json + manifest.autostart。
+	BootstrapFile string
+
 	// ConfigStore 是插件配置权威存储端口（宿主注入）；nil / 打开失败 → 降级为文件态。
 	ConfigStore ConfigStoreOpener
 
@@ -67,6 +71,8 @@ type Plugin struct {
 	ID       string
 	Root     string
 	Manifest *Manifest
+	// exeOverride 来自 plugin.ini 的绝对路径（清单存在时优先于 manifest.runtime.exe）。
+	exeOverride string
 
 	mu          sync.Mutex
 	status      string
@@ -140,6 +146,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 	m.loadEnabled()
 	m.discover()
+	m.applyBootstrap()
 	m.installMessages()
 
 	m.mu.Lock()
@@ -330,9 +337,13 @@ func (m *Manager) supervise(p *Plugin) {
 }
 
 func (m *Manager) runOnce(p *Plugin) error {
-	// runtime.exe 可以是插件目录内的 exe，也可以是 PATH 上的解释器（如 python / node）。
-	exe := p.Manifest.Runtime.Exe
-	if filepath.IsAbs(exe) || strings.ContainsAny(exe, `/\`) || strings.HasSuffix(strings.ToLower(exe), ".exe") {
+	// runtime.exe 可以是插件目录内的 exe，也可以是 PATH 上的解释器（如 python / node）；
+	// plugin.ini 存在时以清单里的绝对路径为准（D-71）。
+	exe := p.exeOverride
+	if exe == "" {
+		exe = p.Manifest.Runtime.Exe
+	}
+	if p.exeOverride == "" && (filepath.IsAbs(exe) || strings.ContainsAny(exe, `/\`) || strings.HasSuffix(strings.ToLower(exe), ".exe")) {
 		if !filepath.IsAbs(exe) {
 			exe = filepath.Join(p.Root, exe)
 		}
